@@ -1,5 +1,6 @@
 from pyspark.sql import SparkSession
-from pyspark.sql.types import StructType,StructField, StringType
+import pyspark.sql.types as t
+import pyspark.sql.functions as f
 
 import json
 import xmltodict
@@ -8,7 +9,10 @@ import re
 # spark-submit --master local[*] --py-files="Users/clarisseguerin-williams/Documents/ofac_data/optimize-spark.py" test.py
 
     
-def keep_alphanumeric(s): return re.sub(r'[^0-9a-zA-Z]', "", s)
+def clean_colnames(df): 
+    re_re = lambda s: re.sub(r'[^0-9a-zA-Z_]', "", s).lower()
+    new_colnames = list(map(re_re, df.columns))
+    return df.toDF(*new_colnames)
 
 
 def get_uk_treasury(file_path="uk_treasury.csv"):
@@ -18,9 +22,8 @@ def get_uk_treasury(file_path="uk_treasury.csv"):
     with open(file_path, 'w') as file_out: file_out.writelines(data[1:])
 
     df = spark.read.option("header", True).csv(file_path)
-    new_colnames = list(map(keep_alphanumeric, df.columns))
-    df = df.toDF(*new_colnames)
-    return df
+    
+    return clean_colnames(df)
 
 
 def get_ofac(file_path="ofac.xml"):
@@ -38,7 +41,7 @@ def get_ofac(file_path="ofac.xml"):
     json_file.close()
 
     df = spark.read.json(file_path, primitivesAsString='true')
-    return df
+    return clean_colnames(df)
     
 
 def print_counts(df, col):
@@ -60,6 +63,47 @@ def show_distinct_vals(df, col):
         .collect()
 
 
+def get_empty_df():
+    schema = t.StructType([ \
+        t.StructField("source", t.StringType(), True), \
+        t.StructField("id", t.StringType(), True), \
+        t.StructField("id_type", t.StringType(), True), \
+        t.StructField("firstname", t.StringType(), True), \
+        t.StructField("lastname", t.StringType(), True), \
+        t.StructField("middlenamelist", t.ArrayType(t.StringType()), True) \
+        ])
+
+    emptyRDD = spark.sparkContext.emptyRDD()
+    df = spark.createDataFrame(emptyRDD, schema)
+
+    return df
+
+
+def make_simple_cols(df):
+
+    if "uid" in df.columns:
+        df = df \
+            .withColumn("source", f.lit("US OFAC").cast(t.StringType())) \
+            .withColumn("id", f.col("uid").cast(t.StringType())) \
+            .withColumn("id_type", f.col("sdntype").cast(t.StringType())) \
+            .withColumn("firstname", f.col("firstname").cast(t.StringType())) \
+            .withColumn("lastname", f.col("lastname").cast(t.StringType())) \
+            .withColumn("middlenamelist", f.lit(None).cast(t.ArrayType(t.StringType()))) 
+
+    elif "groupid" in df.columns:
+        df = df \
+            .withColumn("source", f.lit("UK TREASURY").cast(t.StringType())) \
+            .withColumn("id", f.col("groupid").cast(t.StringType())) \
+            .withColumn("id_type", f.col("grouptype").cast(t.StringType())) \
+            .withColumn("firstname", f.col("name1").cast(t.StringType())) \
+            .withColumn("lastname", f.col("name6").cast(t.StringType())) \
+            .withColumn("middlenamelist", f.lit(None).cast(t.ArrayType(t.StringType())))
+    
+    else: df = None
+
+    return df
+    
+ 
 def main():
 
     global spark
@@ -70,12 +114,11 @@ def main():
     
     uk = get_uk_treasury()
     ofac = get_ofac()
-   
-    uk.printSchema()
-    ofac.printSchema()
+
+    uk = make_simple_cols(uk)
+    ofac = make_simple_cols(ofac)
+        
     
-
-
 
 
 

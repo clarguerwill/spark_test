@@ -8,24 +8,19 @@ import re
 # spark-submit --master local[*] --py-files="Users/clarisseguerin-williams/Documents/ofac_data/optimize-spark.py" test.py
 
     
+def keep_alphanumeric(s): return re.sub(r'[^0-9a-zA-Z]', "", s)
+
 def get_uk_treasury(file_path="uk_treasury.csv"):
-   
-    data = spark.sparkContext.textFile(file_path)
+    
+    with open(file_path, 'r') as file_in: data = file_in.read().splitlines(True)
+    file_path = f"{file_path[:-4]}2.csv"
+    with open(file_path, 'w') as file_out: file_out.writelines(data[1:])
 
-    cols = data.collect()[1].split(",")
-    headers = list(map(lambda x : re.sub("[^0-9a-zA-Z]+", "", x), cols))
-
-    data = data.zipWithIndex().filter(lambda row_index: row_index[1] > 1).keys()
-    data = data.map(lambda row : row.split(","))
-
-    cols = []
-    for col in headers:
-        cols.append(StructField(col, StringType(),True))
-    schema = StructType(cols)
-
-    df = spark.createDataFrame(data, schema)
-
+    df = spark.read.option("header", True).csv(file_path)
+    new_colnames = list(map(keep_alphanumeric, df.columns))
+    df = df.toDF(*new_colnames)
     return df
+
 
 def get_ofac_json(file_path="ofac.xml"):
     
@@ -81,11 +76,9 @@ def main():
     #ofac = get_ofac()
     #uk.printSchema()
     #ofac.printSchema()
-    uk.select("AliasType").show()
-
-
-
-
+    #uk.show()
+    uk.printSchema()
+    
 
 
 

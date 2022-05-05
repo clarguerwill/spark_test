@@ -1,19 +1,21 @@
 from pyspark.sql import SparkSession
-import pyspark.sql.types as t
-import pyspark.sql.functions as f
+import pyspark.sql.types as T
+import pyspark.sql.functions as F
 
 import json
 import xmltodict
 import re
 # com.databricks:spark-xml_2.11:0.12.0
-# spark-submit --master local[*] --py-files="Users/clarisseguerin-williams/Documents/ofac_data/optimize-spark.py" test.py
+# spark-submit --master local[*] --py-files="Users/clarisseguerin-williams/Documents/ofac_data/optimize-spark.py" tesT.py
 
-    
+
+# remove_null_array = F.udf(lambda lst: [l for l in lst if l is not None])
+
+
 def clean_colnames(df): 
     re_re = lambda s: re.sub(r'[^0-9a-zA-Z_]', "", s).lower()
     new_colnames = list(map(re_re, df.columns))
     return df.toDF(*new_colnames)
-
 
 def get_uk_treasury(file_path="uk_treasury.csv"):
     
@@ -64,16 +66,16 @@ def show_distinct_vals(df, col):
 
 
 def get_empty_df():
-    schema = t.StructType([ \
-        t.StructField("source", t.StringType(), True), \
-        t.StructField("id", t.StringType(), True), \
-        t.StructField("id_type", t.StringType(), True), \
-        t.StructField("firstname", t.StringType(), True), \
-        t.StructField("lastname", t.StringType(), True), \
-        t.StructField("middlenamelist", t.ArrayType(t.StringType()), True) \
+    schema = T.StructType([ \
+        T.StructField("source", T.StringType(), True), \
+        T.StructField("id", T.StringType(), True), \
+        T.StructField("id_type", T.StringType(), True), \
+        T.StructField("firstname", T.StringType(), True), \
+        T.StructField("lastname", T.StringType(), True), \
+        T.StructField("middlenamelist", T.ArrayType(T.StringType()), True) \
         ])
 
-    emptyRDD = spark.sparkContext.emptyRDD()
+    emptyRDD = spark.sparkContexT.emptyRDD()
     df = spark.createDataFrame(emptyRDD, schema)
 
     return df
@@ -83,27 +85,41 @@ def make_simple_cols(df):
 
     if "uid" in df.columns:
         df = df \
-            .withColumn("source", f.lit("US OFAC").cast(t.StringType())) \
-            .withColumn("id", f.col("uid").cast(t.StringType())) \
-            .withColumn("id_type", f.col("sdntype").cast(t.StringType())) \
-            .withColumn("firstname", f.col("firstname").cast(t.StringType())) \
-            .withColumn("lastname", f.col("lastname").cast(t.StringType())) \
-            .withColumn("middlenamelist", f.lit(None).cast(t.ArrayType(t.StringType()))) 
+        .withColumn("source", F.lit("US OFAC").cast(T.StringType())) \
+        .withColumn("id", F.col("uid").cast(T.StringType())) \
+        .withColumn("id_type", F.col("sdntype").cast(T.StringType())) \
+        .withColumn("firstname", F.col("firstname").cast(T.StringType())) \
+        .withColumn("lastname", F.col("lastname").cast(T.StringType())) \
+        .withColumn("middlename_list", F.array()) \
+        .withColumn("title", F.col("title").cast(T.StringType()))\
+        .withColumn("position", F.lit(None).cast(T.StringType()))
+
 
     elif "groupid" in df.columns:
+        middlenames = ["name2", "name3", "name4", "name5"]
+
         df = df \
-            .withColumn("source", f.lit("UK TREASURY").cast(t.StringType())) \
-            .withColumn("id", f.col("groupid").cast(t.StringType())) \
-            .withColumn("id_type", f.col("grouptype").cast(t.StringType())) \
-            .withColumn("firstname", f.col("name1").cast(t.StringType())) \
-            .withColumn("lastname", f.col("name6").cast(t.StringType())) \
-            .withColumn("middlenamelist", f.lit(None).cast(t.ArrayType(t.StringType())))
-    
+        .withColumn("source", F.lit("UK TREASURY").cast(T.StringType())) \
+        .withColumn("id", F.col("groupid").cast(T.StringType())) \
+        .withColumn("id_type", F.col("grouptype").cast(T.StringType())) \
+        .withColumn("firstname", F.col("name1").cast(T.StringType())) \
+        .withColumn("lastname", F.col("name6").cast(T.StringType())) \
+        .withColumn("middlename_stage", F.array(*middlenames)) \
+            .withColumn("middlename_list", F.expr("FILTER(middlename_stage, x -> x is not null)")) \
+        .withColumn("title", F.col("title").cast(T.StringType())) \
+        .withColumn("position", F.col("position").cast(T.StringType()))
+
     else: df = None
 
     return df
     
+
+def show_sample_rows(df, cols, n=5, f=.01):
+    df.select(*cols) \
+        .sample(withReplacement=True, fraction=f) \
+        .show(n, False)
  
+
 def main():
 
     global spark
@@ -112,13 +128,22 @@ def main():
         .appName("Test") \
         .getOrCreate() 
     
-    uk = get_uk_treasury()
     ofac = get_ofac()
+    uk = get_uk_treasury()
 
-    uk = make_simple_cols(uk)
+    # ofac.printSchema()
+    # uk.printSchema()
+    # quit()
+
     ofac = make_simple_cols(ofac)
-        
+    uk = make_simple_cols(uk)
+
+    cols = ["source", "id", "id_type", "firstname", "lastname", "middlename_list", "title"
+            , "position"
+            ]
     
+    show_sample_rows(ofac, cols)
+    show_sample_rows(uk, cols)
 
 
 

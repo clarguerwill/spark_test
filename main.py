@@ -10,6 +10,7 @@ import re
     
 def keep_alphanumeric(s): return re.sub(r'[^0-9a-zA-Z]', "", s)
 
+
 def get_uk_treasury(file_path="uk_treasury.csv"):
     
     with open(file_path, 'r') as file_in: data = file_in.read().splitlines(True)
@@ -22,7 +23,7 @@ def get_uk_treasury(file_path="uk_treasury.csv"):
     return df
 
 
-def get_ofac_json(file_path="ofac.xml"):
+def get_ofac(file_path="ofac.xml"):
     
     with open(file_path) as xml_file:
         data_dict = xmltodict.parse(xml_file.read())
@@ -34,13 +35,8 @@ def get_ofac_json(file_path="ofac.xml"):
     file_path = file_path.replace(".xml", ".json")
     with open(file_path, "w") as json_file:
         json_file.write(json_data)
-
     json_file.close()
 
-
-def get_ofac(file_path="ofac.xml"):
-    get_ofac_json(file_path)
-    file_path = file_path.replace(".xml", ".json")
     df = spark.read.json(file_path, primitivesAsString='true')
     return df
     
@@ -73,11 +69,10 @@ def main():
         .getOrCreate() 
     
     uk = get_uk_treasury()
-    #ofac = get_ofac()
-    #uk.printSchema()
-    #ofac.printSchema()
-    #uk.show()
+    ofac = get_ofac()
+   
     uk.printSchema()
+    ofac.printSchema()
     
 
 

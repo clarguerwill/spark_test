@@ -17,6 +17,7 @@ def clean_colnames(df):
     new_colnames = list(map(re_re, df.columns))
     return df.toDF(*new_colnames)
 
+
 def get_uk_treasury(file_path="uk_treasury.csv"):
     
     with open(file_path, 'r') as file_in: data = file_in.read().splitlines(True)
@@ -24,8 +25,9 @@ def get_uk_treasury(file_path="uk_treasury.csv"):
     with open(file_path, 'w') as file_out: file_out.writelines(data[1:])
 
     df = spark.read.option("header", True).csv(file_path)
-    
+    df = df.withColumn("source", F.lit(SRC_UK).cast(T.StringType())) 
     return clean_colnames(df)
+
 
 
 def get_ofac(file_path="ofac.xml"):
@@ -43,6 +45,8 @@ def get_ofac(file_path="ofac.xml"):
     json_file.close()
 
     df = spark.read.json(file_path, primitivesAsString='true')
+    df = df.withColumn("source", F.lit(SRC_OFAC).cast(T.StringType()))
+
     return clean_colnames(df)
     
 
@@ -52,7 +56,7 @@ def print_counts(df, col):
     print(f"-------------\nDistinct Cnt = {cntd}\nCount={cnt}")
 
 
-def show_sample(df, col, n=10, f=.01):
+def show_sample_col(df, col, n=10, f=.01):
     df.select(col) \
         .filter(f"{col} IS NOT NULL") \
         .sample(withReplacement=True, fraction=f) \
@@ -65,27 +69,11 @@ def show_distinct_vals(df, col):
         .collect()
 
 
-def get_empty_df():
-    schema = T.StructType([ \
-        T.StructField("source", T.StringType(), True), \
-        T.StructField("id", T.StringType(), True), \
-        T.StructField("id_type", T.StringType(), True), \
-        T.StructField("firstname", T.StringType(), True), \
-        T.StructField("lastname", T.StringType(), True), \
-        T.StructField("middlenamelist", T.ArrayType(T.StringType()), True) \
-        ])
-
-    emptyRDD = spark.sparkContexT.emptyRDD()
-    df = spark.createDataFrame(emptyRDD, schema)
-
-    return df
-
-
 def make_simple_cols(df):
+    source = df.first()["source"]
 
-    if "uid" in df.columns:
+    if source == SRC_OFAC:
         df = df \
-        .withColumn("source", F.lit("US OFAC").cast(T.StringType())) \
         .withColumn("id", F.col("uid").cast(T.StringType())) \
         .withColumn("id_type", F.col("sdntype").cast(T.StringType())) \
         .withColumn("firstname", F.col("firstname").cast(T.StringType())) \
@@ -95,16 +83,15 @@ def make_simple_cols(df):
         .withColumn("position", F.lit(None).cast(T.StringType()))
 
 
-    elif "groupid" in df.columns:
+    elif source == SRC_UK:
         middlenames = ["name2", "name3", "name4", "name5"]
 
         df = df \
-        .withColumn("source", F.lit("UK TREASURY").cast(T.StringType())) \
         .withColumn("id", F.col("groupid").cast(T.StringType())) \
         .withColumn("id_type", F.col("grouptype").cast(T.StringType())) \
         .withColumn("firstname", F.col("name1").cast(T.StringType())) \
         .withColumn("lastname", F.col("name6").cast(T.StringType())) \
-        .withColumn("middlename_stage", F.array(*middlenames)) \
+        .withColumn("middlename_stage", F.array(*middlenames).cast(T.ArrayType(T.StringType()))) \
             .withColumn("middlename_list", F.expr("FILTER(middlename_stage, x -> x is not null)")) \
         .withColumn("title", F.col("title").cast(T.StringType())) \
         .withColumn("position", F.col("position").cast(T.StringType()))
@@ -114,6 +101,46 @@ def make_simple_cols(df):
     return df
     
 
+def make_dob(df):
+    # ofac "dateOfBirth" "dd mmm yyyy" 
+        # only year
+        # mainEntry == true
+    # uk "dd/mm/yyyy"
+    source = df.first()["source"]
+
+    df = df.withColumn("position", F.lit(None).cast(T.MapType(T.StringType(), T.StringType(), True)))
+
+    if source == SRC_OFAC:
+        pass
+
+    elif source == SRC_UK:
+        dlm = "/"
+        df = df \
+        .withColumn("doblist", F.split(F.col("dob"),dlm).cast(T.ArrayType(T.StringType()))) \
+        .withColumn("day", F.col("doblist").getItem(0)) \
+        .withColumn("month", F.col("doblist").getItem(1)) \
+        .withColumn("year", F.col("doblist").getItem(2))
+        
+        df.createOrReplaceTempView("uk_dob")
+        df = spark.sql("""
+            SELECT source, dob, doblist
+                , CASE CAST(day AS INT) WHEN 0 THEN NULL ELSE day END AS day
+                , CASE CAST(month AS INT) WHEN 0 THEN NULL ELSE month END AS month
+                , CASE CAST(year AS INT) WHEN 0 THEN NULL ELSE year END AS year
+            FROM uk_dob ;
+            """)
+        
+        df = df.withColumn("dob_map", F.create_map(
+            F.lit("day"), F.col("day"),
+            F.lit("month"), F.col("month"), 
+            F.lit("year"), F.col("year"),
+            ))
+
+    else: df = None
+
+    return df
+
+
 def show_sample_rows(df, cols, n=5, f=.01):
     df.select(*cols) \
         .sample(withReplacement=True, fraction=f) \
@@ -122,29 +149,32 @@ def show_sample_rows(df, cols, n=5, f=.01):
 
 def main():
 
-    global spark
+    global spark, SRC_OFAC, SRC_UK
+    SRC_OFAC, SRC_UK = "US OFAC", "UK TREASURY"
     spark = SparkSession.builder \
         .master("local[*]") \
         .appName("Test") \
-        .getOrCreate() 
+        .getOrCreate()
     
-    ofac = get_ofac()
+    #ofac = get_ofac()
     uk = get_uk_treasury()
 
     # ofac.printSchema()
     # uk.printSchema()
     # quit()
 
-    ofac = make_simple_cols(ofac)
-    uk = make_simple_cols(uk)
+    # ofac = make_simple_cols(ofac)
+    # uk = make_simple_cols(uk)
 
-    cols = ["source", "id", "id_type", "firstname", "lastname", "middlename_list", "title"
-            , "position"
-            ]
+    # show_sample_col(ofac, "dateOfBirthList")
+    # show_sample_col(uk, "dob")
+    # quit()
     
-    show_sample_rows(ofac, cols)
+    cols = ["source", "id", "id_type", "firstname", "lastname", "middlename_list", "title", "position"]
+    cols = ["source", "dob", "doblist", "day", "month", "year", "dob_map"]
+    
+    uk = make_dob(uk)
     show_sample_rows(uk, cols)
-
 
 
 

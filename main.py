@@ -22,7 +22,7 @@ def clean_colnames(df):
 def get_uk_treasury(file_path="uk_treasury.csv"):
     pd_df = pd.read_csv(file_path, skiprows=1, header=0)
     pd_df = pd_df.where((pd.notnull(pd_df)), None)
-    
+
     cols = []
     for col in pd_df.columns:
         cols.append(T.StructField(col, T.StringType(),True))
@@ -154,6 +154,10 @@ def make_dob(df):
 
     return df
 
+def agg_uk(df):
+    # agg title, position, dobMap, aliasStruct
+    pass
+
 
 def make_aliases(df):
     source = df.first()["source"]
@@ -164,8 +168,8 @@ def make_aliases(df):
         # uid, type, category, lastName, firstName
         # end as full data schema
         df = df \
-        .withColumn("aliasstr", F.col("akalist")["aka"])
-        
+        .withColumn("aliasStr", F.col("akalist")["aka"])
+
 
     elif source == SRC_UK:
         # AliasType, AliasQuality, lastName, firstName, middleNameList
@@ -175,14 +179,14 @@ def make_aliases(df):
         df = df \
         .withColumn("aliasStruct", F.struct(
             F.lit(None).cast(T.StringType()).alias("id"),
-            F.col("AliasType").cast(T.StringType()).alias("aliasType"),
-            F.col("AliasQuality").cast(T.StringType()).alias("aliasQuality"),
+            F.col("aliastype").cast(T.StringType()).alias("aliasType"),
+            F.col("aliasquality").cast(T.StringType()).alias("aliasQuality"),
             F.col("lastName").cast(T.StringType()).alias("lastName"),
             F.col("firstName").cast(T.StringType()).alias("firstName"),
             F.col("middleNameList").cast(T.ArrayType(T.StringType())).alias("middleNameList"),
-            F.col("NameNonLatinScript").cast(T.StringType()).alias("nonLatinName"),
-            F.col("NonLatinScriptType").cast(T.StringType()).alias("nonLatinType"),
-            F.col("NonLatinScriptLanguage").cast(T.StringType()).alias("nonLatinLanguage")
+            F.col("namenonlatinscript").cast(T.StringType()).alias("nonLatinName"),
+            F.col("nonlatinscripttype").cast(T.StringType()).alias("nonLatinType"),
+            F.col("nonlatinscriptlanguage").cast(T.StringType()).alias("nonLatinLanguage")
         ))
 
     else: df = None
@@ -222,7 +226,6 @@ def main():
     # show_sample_col(uk, "dob")
     # quit()
     
-    
     uk_cols = ["source", "sourceId", "sidType", "firstName", "lastName", "middleNameList", "title"
             , "position" , "dobMap"
             ]
@@ -231,21 +234,21 @@ def main():
     uk = get_uk_treasury()
     uk = make_simple_cols(uk)
 
-    # uk = make_dob(uk)
+    uk = make_dob(uk)
     uk = make_aliases(uk)
     show_sample_rows(uk, cols)
     quit()
 
     ofac_cols = ["source", "sourceId", "sidType", "firstName", "lastName", "middleNameList", "titleList"
-            , "positionList" , "dobMap"
+            , "positionList" , "dobMap", "aliasStr"
             ]
     cols = ["source", "sourceId"]
 
     ofac = get_ofac()
     ofac = make_simple_cols(ofac)
-    # ofac = make_dob(ofac)
+    ofac = make_dob(ofac)
     ofac = make_aliases(ofac)
-    show_sample_rows(ofac, cols)
+    show_sample_rows(ofac, ofac_cols)
     quit()
     
 

@@ -12,8 +12,6 @@ import ast
 # spark-submit --master local[*] --py-files="Users/clarisseguerin-williams/Documents/ofac_data/optimize-spark.py" tesT.py
 
 
-
-
 def clean_colnames(df): 
     re_re = lambda s: re.sub(r'[^0-9a-zA-Z_]', "", s).lower()
     new_colnames = list(map(re_re, df.columns))
@@ -50,35 +48,16 @@ def get_ofac(file_path="ofac.xml"):
     df = df.withColumn("source", F.lit(SRC_OFAC).cast(T.StringType()))
 
     return clean_colnames(df)
-    
-
-def print_counts(df, col):
-    cntd = str(df.select(col).distinct().count())
-    cnt = str(df.select(col).count())
-    print(f"-------------\nDistinct Cnt = {cntd}\nCount={cnt}")
-
-
-def show_sample_col(df, col, n=10, f=.01):
-    df.select(col) \
-        .filter(f"{col} IS NOT NULL") \
-        .sample(withReplacement=True, fraction=f) \
-        .show(n, False)
-
-
-def show_distinct_vals(df, col):
-    df.select(col) \
-        .distinct() \
-        .collect()
-
+  
 
 def make_simple_cols(df):
     source = df.first()["source"]
 
-    if source == SRC_OFAC: 
+    if source == SRC_OFAC:
 
         df = df \
-        .withColumn("id", F.col("uid").cast(T.StringType())) \
-        .withColumn("id_type", F.col("sdntype").cast(T.StringType())) \
+        .withColumn("sourceid", F.col("uid").cast(T.StringType())) \
+        .withColumn("sid_type", F.col("sdntype").cast(T.StringType())) \
         .withColumn("firstname", F.col("firstname").cast(T.StringType())) \
         .withColumn("lastname", F.col("lastname").cast(T.StringType())) \
         .withColumn("middlename_list", F.array()) \
@@ -90,8 +69,8 @@ def make_simple_cols(df):
         middlenames = ["name2", "name3", "name4", "name5"]
 
         df = df \
-        .withColumn("id", F.col("groupid").cast(T.StringType())) \
-        .withColumn("id_type", F.col("grouptype").cast(T.StringType())) \
+        .withColumn("sourceid", F.col("groupid").cast(T.StringType())) \
+        .withColumn("sid_type", F.col("grouptype").cast(T.StringType())) \
         .withColumn("firstname", F.col("name1").cast(T.StringType())) \
         .withColumn("lastname", F.col("name6").cast(T.StringType())) \
         .withColumn("middlename_stage", F.array(*middlenames).cast(T.ArrayType(T.StringType()))) \
@@ -156,11 +135,42 @@ def make_dob(df):
             F.lit("day"), F.col("day"),
             F.lit("month"), F.col("month"), 
             F.lit("year"), F.col("year"),
+            F.lit("year"), F.col("year"),
+            F.lit("year"), F.col("year"),
             ))
 
     else: df = None
 
     return df
+
+
+
+def make_alias_list(df):
+    source = df.first()["source"]
+
+    if source == SRC_OFAC:
+        # uid, type, category, lastName, firstName
+
+        pass
+
+    elif source == SRC_UK:
+        pass
+    else: df = None
+
+    return df
+  
+
+def print_counts(df, col):
+    cntd = str(df.select(col).distinct().count())
+    cnt = str(df.select(col).count())
+    print(f"-------------\nDistinct Cnt = {cntd}\nCount={cnt}")
+
+
+def show_sample_col(df, col, n=20, f=.01):
+    df.select(col) \
+        .filter(f"{col} IS NOT NULL") \
+        .sample(withReplacement=True, fraction=f) \
+        .show(n, False)
 
 
 def show_sample_rows(df, cols, n=10, f=.01):
@@ -177,7 +187,7 @@ def main():
         .master("local[*]") \
         .appName("Spark Assessment") \
         .getOrCreate()
-    
+
     ofac = get_ofac()
     uk = get_uk_treasury()
 
@@ -186,21 +196,23 @@ def main():
     # quit()
 
     ofac = make_simple_cols(ofac)
-    uk = make_simple_cols(uk)
+    # uk = make_simple_cols(uk)
 
-    # show_sample_col(ofac, "dateOfBirthList")
+    # ofac = make_dob(ofac)
+    # uk = make_dob(uk)
+
+    # show_sample_col(ofac, "akalist")
     # show_sample_col(uk, "dob")
     # quit()
-    
-    cols = ["source", "id", "id_type", "firstname", "lastname", "middlename_list", "title", "position"
+
+    cols = ["source", "sourceid", "sid_type", "firstname", "lastname", "middlename_list", "title", "position"
             , "dob_map"
             ]
-    
-    ofac = make_dob(ofac)
-    uk = make_dob(uk)
-
+    cols = ["source", "sourceid", "dobstr"]
+    #cols = ["source", "sourceid", "akalist"]
+ 
     show_sample_rows(ofac, cols)
-    show_sample_rows(uk, cols)
+    # show_sample_rows(uk, cols)
     
 
 if __name__ == "__main__":

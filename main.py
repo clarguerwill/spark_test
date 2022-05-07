@@ -56,25 +56,26 @@ def make_simple_cols(df):
     if source == SRC_OFAC:
 
         df = df \
-        .withColumn("sourceid", F.col("uid").cast(T.StringType())) \
-        .withColumn("sid_type", F.col("sdntype").cast(T.StringType())) \
-        .withColumn("firstname", F.col("firstname").cast(T.StringType())) \
-        .withColumn("lastname", F.col("lastname").cast(T.StringType())) \
-        .withColumn("middlename_list", F.array()) \
-        .withColumn("title", F.col("title").cast(T.StringType()))\
-        .withColumn("position", F.lit(None).cast(T.StringType()))
+        .withColumn("sourceId", F.col("uid").cast(T.StringType())) \
+        .withColumn("sidType", F.col("sdntype").cast(T.StringType())) \
+        .withColumn("firstName", F.col("firstname").cast(T.StringType())) \
+        .withColumn("lastName", F.col("lastname").cast(T.StringType())) \
+        .withColumn("middleNameList", F.array()) \
+        .withColumn("titleStage", F.array("title").cast(T.ArrayType(T.StringType()))) \
+            .withColumn("titleList", F.expr("FILTER(titleStage, x -> x is not null)")) \
+        .withColumn("positionList",  F.array())
 
 
     elif source == SRC_UK:
         middlenames = ["name2", "name3", "name4", "name5"]
 
         df = df \
-        .withColumn("sourceid", F.col("groupid").cast(T.StringType())) \
-        .withColumn("sid_type", F.col("grouptype").cast(T.StringType())) \
-        .withColumn("firstname", F.col("name1").cast(T.StringType())) \
-        .withColumn("lastname", F.col("name6").cast(T.StringType())) \
-        .withColumn("middlename_stage", F.array(*middlenames).cast(T.ArrayType(T.StringType()))) \
-            .withColumn("middlename_list", F.expr("FILTER(middlename_stage, x -> x is not null)")) \
+        .withColumn("sourceId", F.col("groupid").cast(T.StringType())) \
+        .withColumn("sidType", F.col("grouptype").cast(T.StringType())) \
+        .withColumn("firstName", F.col("name1").cast(T.StringType())) \
+        .withColumn("lastName", F.col("name6").cast(T.StringType())) \
+        .withColumn("middleNameStage", F.array(*middlenames).cast(T.ArrayType(T.StringType()))) \
+            .withColumn("middleNameList", F.expr("FILTER(middleNameStage, x -> x is not null)")) \
         .withColumn("title", F.col("title").cast(T.StringType())) \
         .withColumn("position", F.col("position").cast(T.StringType()))
 
@@ -89,54 +90,61 @@ def make_dob(df):
     source = df.first()["source"]
 
     if source == SRC_OFAC:
-
-        def ofac_dob(s):
-            s = ast.literal_eval(s) if s is not None else None
-            if isinstance(s, list):
-                for d in s:
-                    if d["mainEntry"] == "true":
-                        return d["dateOfBirth"].strip()
-            elif isinstance(s, dict): 
-                return s["dateOfBirth"].strip()
-            else: return None
-
-        udf_dob = F.udf(lambda s: ofac_dob(s), T.StringType())
-
+        
         months = {'JAN': '01', 'FEB': '02', 'MAR': '03', 'APR': '04', 'MAY': '05', 'JUN': '06', 
                     'JUL': '07', 'AUG': '08', 'SEP': '09', 'OCT': '10', 'NOV': '11', 'DEC': '12'}
-        udf_dob_month = F.udf(lambda s: months.get(s), T.StringType())
+
+        def ofac_dob(x):
+            x = ast.literal_eval(x) if x is not None and isinstance(x, str) else None
+            if isinstance(x, list):
+                l = []
+                for d in x: 
+                    d = ofac_dob(d)
+                    l.extend(d) if d is not None else None
+                return l
+
+            elif isinstance(x, dict):
+                d = {}
+                d["mainEntry"] = x["mainEntry"] 
+                d["id"] = x["uid"] 
+                dob = x["dateOfBirth"].upper()
+                
+                dy = re.search(r'(\d{2})', dob) if len(dob) > 4 else None
+                dy = dy.group(0) if dy is not None else None
+                d["day"] = dy if dy is not None and int(dy) != 0 else None
+                y = re.search(r'(\d{4})', dob)
+                y = y.group(0) if y is not None else None
+                d["year"] = y if y is not None and int(y) != 0 else None
+                m = re.search(r'([a-zA-Z]{3})', dob)
+                d["month"] = months.get(m.group(0)) if m is not None else None
+
+                return [d] if d is not None else None
+
+            else: return None
+
+        udf_dob = F.udf(lambda x: ofac_dob(x), T.ArrayType(T.MapType(T.StringType(), T.StringType())))
 
         df = df \
-        .withColumn("fulldobstr", F.col("dateofbirthlist")["dateOfBirthItem"]) \
-        .withColumn("dobstr", udf_dob(F.col("fulldobstr"))) \
-        .withColumn("day", F.when(F.length(F.col("dobstr")) > 4, 
-            F.regexp_extract(F.col("dobstr"), r"(\d{2})", 1))) \
-        .withColumn("month_long", F.upper(F.regexp_extract(F.col("dobstr"), r'([a-zA-Z]{3})', 1))) \
-        .withColumn("month", udf_dob_month(F.col("month_long"))) \
-        .withColumn("year", F.regexp_extract(F.col("dobstr"), r'(\d{4})', 1)) \
-        .withColumn("dob_map", F.create_map(
-            F.lit("day"), F.col("day"),
-            F.lit("month"), F.col("month"), 
-            F.lit("year"), F.col("year"),
-            ))
+        .withColumn("dobStr", F.col("dateofbirthlist")["dateOfBirthItem"]) \
+        .withColumn("dobMap", udf_dob(F.col("dobStr")))
 
 
     elif source == SRC_UK:
         dlm = "/"
         df = df \
-        .withColumn("doblist", F.split(F.col("dob"),dlm).cast(T.ArrayType(T.StringType()))) \
-        .withColumn("day", F.col("doblist").getItem(0)) \
-        .withColumn("month", F.col("doblist").getItem(1)) \
-        .withColumn("year", F.col("doblist").getItem(2)) \
+        .withColumn("dobList", F.split(F.col("dob"),dlm).cast(T.ArrayType(T.StringType()))) \
+        .withColumn("day", F.col("dobList").getItem(0)) \
+        .withColumn("month", F.col("dobList").getItem(1)) \
+        .withColumn("year", F.col("dobList").getItem(2)) \
         .withColumn("day", F.when(F.col("day").cast("int") != 0, F.col("day"))) \
         .withColumn("month", F.when(F.col("month").cast("int") != 0, F.col("month"))) \
         .withColumn("year", F.when(F.col("year").cast("int") != 0, F.col("year"))) \
-        .withColumn("dob_map", F.create_map(
+        .withColumn("dobMap", F.create_map(
+            F.lit("mainEntry"), F.lit(None),
+            F.lit("id"), F.lit(None),
             F.lit("day"), F.col("day"),
             F.lit("month"), F.col("month"), 
-            F.lit("year"), F.col("year"),
-            F.lit("year"), F.col("year"),
-            F.lit("year"), F.col("year"),
+            F.lit("year"), F.col("year")            
             ))
 
     else: df = None
@@ -144,17 +152,21 @@ def make_dob(df):
     return df
 
 
-
 def make_alias_list(df):
     source = df.first()["source"]
+    # array struct (id, aliasType, aliasQuality, lastName, firstName, middlesNameList)
 
     if source == SRC_OFAC:
         # uid, type, category, lastName, firstName
-
+        # end as full data schema
         pass
 
     elif source == SRC_UK:
+        # AliasType, AliasQuality, lastName, firstName, middlesNameList
+
+        # end as structure type
         pass
+
     else: df = None
 
     return df
@@ -188,34 +200,32 @@ def main():
         .appName("Spark Assessment") \
         .getOrCreate()
 
-    ofac = get_ofac()
-    uk = get_uk_treasury()
-
-    # ofac.printSchema()
-    # uk.printSchema()
-    # quit()
-
-    ofac = make_simple_cols(ofac)
-    # uk = make_simple_cols(uk)
-
-    # ofac = make_dob(ofac)
-    # uk = make_dob(uk)
-
     # show_sample_col(ofac, "akalist")
     # show_sample_col(uk, "dob")
     # quit()
-
-    cols = ["source", "sourceid", "sid_type", "firstname", "lastname", "middlename_list", "title", "position"
-            , "dob_map"
+    
+    ofac_cols = ["source", "sourceId", "sidType", "firstName", "lastName", "middleNameList", "titleList"
+            , "positionList" , "dobMap"
             ]
-    cols = ["source", "sourceid", "dobstr"]
-    #cols = ["source", "sourceid", "akalist"]
- 
+    cols = ["source", "sourceId"]
+
+    ofac = get_ofac()
+    ofac = make_simple_cols(ofac)
+    # ofac = make_dob(ofac)
     show_sample_rows(ofac, cols)
-    # show_sample_rows(uk, cols)
+
+    
+    quit()
+    uk_cols = ["source", "sourceId", "sidType", "firstName", "lastName", "middleNameList", "title"
+            , "position" , "dobMap"
+            ]
+    
+    uk = get_uk_treasury()
+    uk = make_simple_cols(uk)
+    uk = make_dob(uk)
+    show_sample_rows(uk, uk_cols)
     
 
 if __name__ == "__main__":
     main()
-
 

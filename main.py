@@ -129,13 +129,8 @@ def make_dob(df):
                 d["year"] = dob[-4:] if dob[-4:].isnumeric() else None
                 return d
             """
-            
 
-            
-
-
-
-        udf_dob = F.udf(lambda s: ofac_dob(s), T.StringType()) T.ArrayType(T.MapType(T.StringType(), T.StringType())))
+        udf_dob = F.udf(lambda s: ofac_dob(s), T.StringType) #T.ArrayType(T.MapType(T.StringType(), T.StringType())))
 
         df = df \
         .withColumn("fulldobstr", F.col("dateofbirthlist")["dateOfBirthItem"]) \

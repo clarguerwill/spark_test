@@ -152,20 +152,35 @@ def make_dob(df):
     return df
 
 
-def make_alias_list(df):
+def make_aliases(df):
     source = df.first()["source"]
     # array struct (id, aliasType, aliasQuality, lastName, firstName, middlesNameList)
+        # nonLatinName, nonLatinType, nonLatinLanguage
 
     if source == SRC_OFAC:
         # uid, type, category, lastName, firstName
         # end as full data schema
-        pass
+        df = df \
+        .withColumn("aliasstr", F.col("akalist")["aka"])
+        
 
     elif source == SRC_UK:
-        # AliasType, AliasQuality, lastName, firstName, middlesNameList
+        # AliasType, AliasQuality, lastName, firstName, middleNameList
+        # Name Non-Latin Script and Non-Latin Script Type and Non-Latin Script Language
 
         # end as structure type
-        pass
+        df = df \
+        .withColumn("aliasStruct", F.struct(
+            F.lit(None).cast(T.StringType()).alias("id"),
+            F.col("AliasType").cast(T.StringType()).alias("aliasType"),
+            F.col("AliasQuality").cast(T.StringType()).alias("aliasQuality"),
+            F.col("lastName").cast(T.StringType()).alias("lastName"),
+            F.col("firstName").cast(T.StringType()).alias("firstName"),
+            F.col("middleNameList").cast(T.ArrayType(T.StringType())).alias("middleNameList"),
+            F.col("NameNonLatinScript").cast(T.StringType()).alias("nonLatinName"),
+            F.col("NonLatinScriptType").cast(T.StringType()).alias("nonLatinType"),
+            F.col("NonLatinScriptLanguage").cast(T.StringType()).alias("nonLatinLanguage")
+        ))
 
     else: df = None
 
@@ -204,6 +219,20 @@ def main():
     # show_sample_col(uk, "dob")
     # quit()
     
+    
+    uk_cols = ["source", "sourceId", "sidType", "firstName", "lastName", "middleNameList", "title"
+            , "position" , "dobMap"
+            ]
+    cols = ["source", "sourceId", "aliasStruct"]
+    
+    uk = get_uk_treasury()
+    uk = make_simple_cols(uk)
+
+    # uk = make_dob(uk)
+    uk = make_aliases(uk)
+    show_sample_rows(uk, cols)
+    quit()
+
     ofac_cols = ["source", "sourceId", "sidType", "firstName", "lastName", "middleNameList", "titleList"
             , "positionList" , "dobMap"
             ]
@@ -212,18 +241,9 @@ def main():
     ofac = get_ofac()
     ofac = make_simple_cols(ofac)
     # ofac = make_dob(ofac)
+    ofac = make_aliases(ofac)
     show_sample_rows(ofac, cols)
-
-    
     quit()
-    uk_cols = ["source", "sourceId", "sidType", "firstName", "lastName", "middleNameList", "title"
-            , "position" , "dobMap"
-            ]
-    
-    uk = get_uk_treasury()
-    uk = make_simple_cols(uk)
-    uk = make_dob(uk)
-    show_sample_rows(uk, uk_cols)
     
 
 if __name__ == "__main__":

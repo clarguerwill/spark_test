@@ -4,6 +4,7 @@ from pyspark.sql import SparkSession
 import pyspark.sql.types as T
 import pyspark.sql.functions as F
 
+import pandas as pd
 import json
 import xmltodict
 import re
@@ -19,15 +20,17 @@ def clean_colnames(df):
 
 
 def get_uk_treasury(file_path="uk_treasury.csv"):
+    pd_df = pd.read_csv(file_path, skiprows=1, header=0)
+    pd_df = pd_df.where((pd.notnull(pd_df)), None)
     
-    with open(file_path, 'r') as file_in: data = file_in.read().splitlines(True)
-    file_path = f"{file_path[:-4]}2.csv"
-    with open(file_path, 'w') as file_out: file_out.writelines(data[1:])
+    cols = []
+    for col in pd_df.columns:
+        cols.append(T.StructField(col, T.StringType(),True))
+    schema = T.StructType(cols)
 
-    df = spark.read.option("header", True).csv(file_path)
+    df = spark.createDataFrame(pd_df, schema)
     df = df.withColumn("source", F.lit(SRC_UK).cast(T.StringType())) 
     return clean_colnames(df)
-
 
 
 def get_ofac(file_path="ofac.xml"):

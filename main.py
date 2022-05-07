@@ -1,3 +1,5 @@
+from array import ArrayType
+from tokenize import String
 from pyspark.sql import SparkSession
 import pyspark.sql.types as T
 import pyspark.sql.functions as F
@@ -5,11 +7,11 @@ import pyspark.sql.functions as F
 import json
 import xmltodict
 import re
+import ast
 # com.databricks:spark-xml_2.11:0.12.0
 # spark-submit --master local[*] --py-files="Users/clarisseguerin-williams/Documents/ofac_data/optimize-spark.py" tesT.py
 
 
-# remove_null_array = F.udf(lambda lst: [l for l in lst if l is not None])
 
 
 def clean_colnames(df): 
@@ -72,7 +74,8 @@ def show_distinct_vals(df, col):
 def make_simple_cols(df):
     source = df.first()["source"]
 
-    if source == SRC_OFAC:
+    if source == SRC_OFAC: 
+
         df = df \
         .withColumn("id", F.col("uid").cast(T.StringType())) \
         .withColumn("id_type", F.col("sdntype").cast(T.StringType())) \
@@ -103,15 +106,41 @@ def make_simple_cols(df):
 
 def make_dob(df):
     # ofac "dateOfBirth" "dd mmm yyyy" 
-        # only year
-        # mainEntry == true
-    # uk "dd/mm/yyyy"
+
     source = df.first()["source"]
 
-    df = df.withColumn("position", F.lit(None).cast(T.MapType(T.StringType(), T.StringType(), True)))
-
     if source == SRC_OFAC:
-        pass
+        def ofac_dob(s):
+            s = ast.literal_eval(s) if s is not None else None
+            if isinstance(s, list):
+                for d in s:
+                    if d["mainEntry"] == "true":
+                        return d["dateOfBirth"].strip()
+            elif isinstance(s, dict): 
+                return s["dateOfBirth"].strip()
+            else: return None
+            """
+            d = {}
+            months = {'JAN': '01', 'FEB': '02', 'MAR': '03', 'APR': '04', 'MAY': '05', 'JUN': '06', 
+                    'JUL': '07', 'AUG': '08', 'SEP': '09', 'OCT': '10', 'NOV': '11', 'DEC': '12'}
+            if dob:
+                d["day"] = dob[-4:] if dob[:2].isnumeric() and len(dob) > 4 else None
+                d["month"] = dob[-4:] if dob[:2].isnumeric() and len(dob) > 4 else None
+                d["year"] = dob[-4:] if dob[-4:].isnumeric() else None
+                return d
+            """
+            
+
+            
+
+
+
+        udf_dob = F.udf(lambda s: ofac_dob(s), T.StringType()) T.ArrayType(T.MapType(T.StringType(), T.StringType())))
+
+        df = df \
+        .withColumn("fulldobstr", F.col("dateofbirthlist")["dateOfBirthItem"]) \
+        .withColumn("dobstr", udf_dob(F.col("fulldobstr")))
+
 
     elif source == SRC_UK:
         dlm = "/"
@@ -123,7 +152,7 @@ def make_dob(df):
         
         df.createOrReplaceTempView("uk_dob")
         df = spark.sql("""
-            SELECT source, dob, doblist
+            SELECT *
                 , CASE CAST(day AS INT) WHEN 0 THEN NULL ELSE day END AS day
                 , CASE CAST(month AS INT) WHEN 0 THEN NULL ELSE month END AS month
                 , CASE CAST(year AS INT) WHEN 0 THEN NULL ELSE year END AS year
@@ -153,11 +182,11 @@ def main():
     SRC_OFAC, SRC_UK = "US OFAC", "UK TREASURY"
     spark = SparkSession.builder \
         .master("local[*]") \
-        .appName("Test") \
+        .appName("Spark Assessment") \
         .getOrCreate()
     
-    #ofac = get_ofac()
-    uk = get_uk_treasury()
+    ofac = get_ofac()
+    # uk = get_uk_treasury()
 
     # ofac.printSchema()
     # uk.printSchema()
@@ -170,11 +199,21 @@ def main():
     # show_sample_col(uk, "dob")
     # quit()
     
-    cols = ["source", "id", "id_type", "firstname", "lastname", "middlename_list", "title", "position"]
-    cols = ["source", "dob", "doblist", "day", "month", "year", "dob_map"]
+    cols = ["source", "id", "id_type", "firstname", "lastname", "middlename_list", "title", "position"
+            , "dateOfBirthList"
+            ]
+    cols = ["source", "uid", "dobstr"]
     
-    uk = make_dob(uk)
-    show_sample_rows(uk, cols)
+    ofac = make_dob(ofac)
+
+    #uk = make_dob(uk)
+    show_sample_rows(ofac, cols)
+
+    #ofac.select(*cols).write.csv("test.csv")
+
+    #show_sample_rows(uk, cols)
+
+
 
 
 

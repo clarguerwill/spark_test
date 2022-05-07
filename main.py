@@ -110,6 +110,9 @@ def make_dob(df):
     source = df.first()["source"]
 
     if source == SRC_OFAC:
+        months = {'JAN': '01', 'FEB': '02', 'MAR': '03', 'APR': '04', 'MAY': '05', 'JUN': '06', 
+                    'JUL': '07', 'AUG': '08', 'SEP': '09', 'OCT': '10', 'NOV': '11', 'DEC': '12'}
+
         def ofac_dob(s):
             s = ast.literal_eval(s) if s is not None else None
             if isinstance(s, list):
@@ -119,22 +122,24 @@ def make_dob(df):
             elif isinstance(s, dict): 
                 return s["dateOfBirth"].strip()
             else: return None
-            """
-            d = {}
-            months = {'JAN': '01', 'FEB': '02', 'MAR': '03', 'APR': '04', 'MAY': '05', 'JUN': '06', 
-                    'JUL': '07', 'AUG': '08', 'SEP': '09', 'OCT': '10', 'NOV': '11', 'DEC': '12'}
-            if dob:
-                d["day"] = dob[-4:] if dob[:2].isnumeric() and len(dob) > 4 else None
-                d["month"] = dob[-4:] if dob[:2].isnumeric() and len(dob) > 4 else None
-                d["year"] = dob[-4:] if dob[-4:].isnumeric() else None
-                return d
-            """
 
-        udf_dob = F.udf(lambda s: ofac_dob(s), T.StringType) #T.ArrayType(T.MapType(T.StringType(), T.StringType())))
+        udf_dob = F.udf(lambda s: ofac_dob(s), T.StringType())
+        udf_dob_month = F.udf(lambda s: months.get(s), T.StringType())
 
+        
         df = df \
         .withColumn("fulldobstr", F.col("dateofbirthlist")["dateOfBirthItem"]) \
-        .withColumn("dobstr", udf_dob(F.col("fulldobstr")))
+        .withColumn("dobstr", udf_dob(F.col("fulldobstr"))) \
+        .withColumn("day", F.when(F.length(F.col("dobstr")) > 4, 
+            F.regexp_extract(F.col("dobstr"), r"(\d{2})", 1))) \
+        .withColumn("month_long", F.upper(F.regexp_extract(F.col("dobstr"), r'([a-zA-Z]{3})', 1))) \
+        .withColumn("month", udf_dob_month(F.col("month_long"))) \
+        .withColumn("year", F.regexp_extract(F.col("dobstr"), r'(\d{4})', 1)) \
+        .withColumn("dob_map", F.create_map(
+            F.lit("day"), F.col("day"),
+            F.lit("month"), F.col("month"), 
+            F.lit("year"), F.col("year"),
+            ))
 
 
     elif source == SRC_UK:
@@ -148,16 +153,16 @@ def make_dob(df):
         df.createOrReplaceTempView("uk_dob")
         df = spark.sql("""
             SELECT *
-                , CASE CAST(day AS INT) WHEN 0 THEN NULL ELSE day END AS day
-                , CASE CAST(month AS INT) WHEN 0 THEN NULL ELSE month END AS month
-                , CASE CAST(year AS INT) WHEN 0 THEN NULL ELSE year END AS year
+                , CASE CAST(day AS INT) WHEN 0 THEN NULL ELSE day END AS day_clean
+                , CASE CAST(month AS INT) WHEN 0 THEN NULL ELSE month END AS month_clean
+                , CASE CAST(year AS INT) WHEN 0 THEN NULL ELSE year END AS year_clean
             FROM uk_dob ;
             """)
         
         df = df.withColumn("dob_map", F.create_map(
-            F.lit("day"), F.col("day"),
-            F.lit("month"), F.col("month"), 
-            F.lit("year"), F.col("year"),
+            F.lit("day"), F.col("day_clean"),
+            F.lit("month"), F.col("month_clean"), 
+            F.lit("year"), F.col("year_clean"),
             ))
 
     else: df = None
@@ -165,7 +170,7 @@ def make_dob(df):
     return df
 
 
-def show_sample_rows(df, cols, n=5, f=.01):
+def show_sample_rows(df, cols, n=10, f=.01):
     df.select(*cols) \
         .sample(withReplacement=True, fraction=f) \
         .show(n, False)
@@ -181,36 +186,29 @@ def main():
         .getOrCreate()
     
     ofac = get_ofac()
-    # uk = get_uk_treasury()
+    uk = get_uk_treasury()
 
     # ofac.printSchema()
     # uk.printSchema()
     # quit()
 
-    # ofac = make_simple_cols(ofac)
-    # uk = make_simple_cols(uk)
+    ofac = make_simple_cols(ofac)
+    uk = make_simple_cols(uk)
 
     # show_sample_col(ofac, "dateOfBirthList")
     # show_sample_col(uk, "dob")
     # quit()
     
     cols = ["source", "id", "id_type", "firstname", "lastname", "middlename_list", "title", "position"
-            , "dateOfBirthList"
+            , "dob_map"
             ]
-    cols = ["source", "uid", "dobstr"]
     
     ofac = make_dob(ofac)
+    uk = make_dob(uk)
 
-    #uk = make_dob(uk)
     show_sample_rows(ofac, cols)
-
-    #ofac.select(*cols).write.csv("test.csv")
-
-    #show_sample_rows(uk, cols)
-
-
-
-
+    show_sample_rows(uk, cols)
+    
 
 if __name__ == "__main__":
     main()

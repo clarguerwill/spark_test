@@ -110,8 +110,6 @@ def make_dob(df):
     source = df.first()["source"]
 
     if source == SRC_OFAC:
-        months = {'JAN': '01', 'FEB': '02', 'MAR': '03', 'APR': '04', 'MAY': '05', 'JUN': '06', 
-                    'JUL': '07', 'AUG': '08', 'SEP': '09', 'OCT': '10', 'NOV': '11', 'DEC': '12'}
 
         def ofac_dob(s):
             s = ast.literal_eval(s) if s is not None else None
@@ -124,9 +122,11 @@ def make_dob(df):
             else: return None
 
         udf_dob = F.udf(lambda s: ofac_dob(s), T.StringType())
+
+        months = {'JAN': '01', 'FEB': '02', 'MAR': '03', 'APR': '04', 'MAY': '05', 'JUN': '06', 
+                    'JUL': '07', 'AUG': '08', 'SEP': '09', 'OCT': '10', 'NOV': '11', 'DEC': '12'}
         udf_dob_month = F.udf(lambda s: months.get(s), T.StringType())
 
-        
         df = df \
         .withColumn("fulldobstr", F.col("dateofbirthlist")["dateOfBirthItem"]) \
         .withColumn("dobstr", udf_dob(F.col("fulldobstr"))) \
@@ -148,21 +148,14 @@ def make_dob(df):
         .withColumn("doblist", F.split(F.col("dob"),dlm).cast(T.ArrayType(T.StringType()))) \
         .withColumn("day", F.col("doblist").getItem(0)) \
         .withColumn("month", F.col("doblist").getItem(1)) \
-        .withColumn("year", F.col("doblist").getItem(2))
-        
-        df.createOrReplaceTempView("uk_dob")
-        df = spark.sql("""
-            SELECT *
-                , CASE CAST(day AS INT) WHEN 0 THEN NULL ELSE day END AS day_clean
-                , CASE CAST(month AS INT) WHEN 0 THEN NULL ELSE month END AS month_clean
-                , CASE CAST(year AS INT) WHEN 0 THEN NULL ELSE year END AS year_clean
-            FROM uk_dob ;
-            """)
-        
-        df = df.withColumn("dob_map", F.create_map(
-            F.lit("day"), F.col("day_clean"),
-            F.lit("month"), F.col("month_clean"), 
-            F.lit("year"), F.col("year_clean"),
+        .withColumn("year", F.col("doblist").getItem(2)) \
+        .withColumn("day", F.when(F.col("day").cast("int") != 0, F.col("day"))) \
+        .withColumn("month", F.when(F.col("month").cast("int") != 0, F.col("month"))) \
+        .withColumn("year", F.when(F.col("year").cast("int") != 0, F.col("year"))) \
+        .withColumn("dob_map", F.create_map(
+            F.lit("day"), F.col("day"),
+            F.lit("month"), F.col("month"), 
+            F.lit("year"), F.col("year"),
             ))
 
     else: df = None

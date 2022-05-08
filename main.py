@@ -1,6 +1,6 @@
 from array import ArrayType
 from tokenize import String
-from pyspark.sql import SparkSession
+from pyspark.sql import SparkSession, Window
 import pyspark.sql.types as T
 import pyspark.sql.functions as F
 
@@ -30,7 +30,7 @@ def get_uk_treasury(file_path="uk_treasury.csv"):
     schema = T.StructType(cols)
 
     df = spark.createDataFrame(pd_df, schema)
-    df = df.withColumn("source", F.lit(SRC_UK).cast(T.StringType())) 
+    df = df.withColumn("source", F.lit(SRC_UK).cast(T.StringType()))
     return clean_colnames(df)
 
 
@@ -202,7 +202,7 @@ def make_aliases(df):
         udf_alias = F.udf(lambda x: ofac_alias(x), alias_schema)
 
         df = df \
-        .withColumn("aliasStr", F.col("akalist")["aka"])  \
+        .withColumn("aliasStr", F.col("akalist")["aliastype"])  \
         .withColumn("aliasStruct", udf_alias(F.col("aliasStr")))
         
 
@@ -233,13 +233,19 @@ def aggregate_uk(uk):
     # title (distinct across all rows) >>> list
     # position (distinct across all rows) >>> list
     # dobMap (distinct across all rows) >>> list 
-    # aliasStruct (distinct across all rows) >>> list 
-    source_ids = uk.select("sourceId").distinct().rdd.flatMap(lambda x: x).collect()
-    print(len(source_ids))
-    uk = uk.repartition(1, "sourceId")
-    print(uk.rdd.getNumPartitions())
+    # aliasStruct (distinct across all rows) >>> list
+    uk = uk \
+        .withColumn("aliasType", F.col("aliasStruct")["aliasType"]) \
+        .withColumn("orderId", 
+            F.when(F.col("aliasType") == "Primary name", 1) \
+            .when(F.col("aliasType") == "Primary name variation", 2) \
+            .otherwise(F.lit(0))
+        ).drop("aliasType") \
+        .withColumn("row_num", F.row_number().over(Window.partitionBy("sourceId").orderBy("orderId")))
+    
+    df = uk.filter("row_num == 1").drop("row_num")
+    df2 = uk.filter("row_num !> 1").drop("row_num")
 
-    df = None
     return df
 
 

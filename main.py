@@ -126,7 +126,7 @@ def make_dob(df):
 
             else: return None
 
-        udf_dob = F.udf(lambda x: ofac_dob(x), T.ArrayType(T.MapType(T.StringType(), T.StringType())))
+        udf_dob = F.udf(ofac_dob, T.ArrayType(T.MapType(T.StringType(), T.StringType())))
 
         df = df \
         .withColumn("dobStr", F.col("dateofbirthlist")["dateOfBirthItem"]) \
@@ -158,8 +158,6 @@ def make_dob(df):
 
 def make_aliases(df):
     source = df.first()["source"]
-    # array struct (id, aliasType, aliasQuality, lastName, firstName, middlesNameList)
-        # nonLatinName, nonLatinType, nonLatinLanguage
 
     if source == SRC_OFAC:
         # uid, type, category, lastName, firstName
@@ -180,9 +178,6 @@ def make_aliases(df):
                 d["firstName"] = x["firstName"] if "firstName" in x.keys() else None
                 d["lastName"] = x["lastName"] if "lastName" in x.keys() else None
                 d["middleNameList"] = None
-                d["nonLatinName"] = None
-                d["nonLatinType"] = None
-                d["nonLatinLanguage"] = None
                 return [d] if d is not None else None
 
             else: return None
@@ -193,16 +188,13 @@ def make_aliases(df):
             T.StructField("aliasQuality", T.StringType(),True), \
             T.StructField("firstName", T.StringType(), True), \
             T.StructField("lastName", T.StringType(), True), \
-            T.StructField("middleNameList", T.ArrayType(T.StringType()), True), \
-            T.StructField("nonLatinName", T.StringType(), True), \
-            T.StructField("nonLatinType", T.StringType(), True), \
-            T.StructField("nonLatinLanguage", T.StringType(), True) 
+            T.StructField("middleNameList", T.ArrayType(T.StringType()), True)
         ]))
 
-        udf_alias = F.udf(lambda x: ofac_alias(x), alias_schema)
+        udf_alias = F.udf(ofac_alias, alias_schema)
 
         df = df \
-        .withColumn("aliasStr", F.col("akalist")["aliastype"])  \
+        .withColumn("aliasStr", F.col("akalist")["aka"]) \
         .withColumn("aliasStruct", udf_alias(F.col("aliasStr")))
         
 
@@ -215,10 +207,7 @@ def make_aliases(df):
             F.col("aliasquality").cast(T.StringType()).alias("aliasQuality"),
             F.col("firstName").cast(T.StringType()).alias("firstName"),
             F.col("lastName").cast(T.StringType()).alias("lastName"),
-            F.col("middleNameList").cast(T.ArrayType(T.StringType())).alias("middleNameList"),
-            F.col("namenonlatinscript").cast(T.StringType()).alias("nonLatinName"),
-            F.col("nonlatinscripttype").cast(T.StringType()).alias("nonLatinType"),
-            F.col("nonlatinscriptlanguage").cast(T.StringType()).alias("nonLatinLanguage")
+            F.col("middleNameList").cast(T.ArrayType(T.StringType())).alias("middleNameList")
         ))
 
     else: df = None
@@ -227,8 +216,7 @@ def make_aliases(df):
 
 
 def aggregate_uk(uk):
-    # dobMap (distinct across all rows) >>> list 
-    # aliasStruct (distinct across all rows) >>> list
+
     uk = uk \
         .withColumn("aliasType", F.col("aliasStruct")["aliasType"]) \
         .withColumn("orderId", 
@@ -252,10 +240,32 @@ def aggregate_uk(uk):
         F.collect_set(F.to_json(F.col("aliasStruct"))).alias("aliasStruct")
     )
 
-    # df2.select("dobMap").filter("sourceId == 13720").show(10, False)
-    # df2.select("dobMap").sample(withReplacement=True, fraction=.01).show(10, False)
+    alias_schema = T.ArrayType(T.StructType([
+            T.StructField("id", T.StringType(),True), \
+            T.StructField("aliasType", T.StringType(),True), \
+            T.StructField("aliasQuality", T.StringType(),True), \
+            T.StructField("firstName", T.StringType(), True), \
+            T.StructField("lastName", T.StringType(), True), \
+            T.StructField("middleNameList", T.ArrayType(T.StringType()), True)
+        ]))
+
+    def convert_str_to_dict(arr):
+        arr2 = [ast.literal_eval(d) for d in arr if d is not None]
+        return arr2
+
+    udf_dob = F.udf(convert_str_to_dict, T.ArrayType(T.MapType(T.StringType(), T.StringType())))
+    udf_alias = F.udf(convert_str_to_dict, alias_schema)
+
+    df2 = df2 \
+        .withColumn("dobMap", udf_dob(F.col("dobMap"))) \
+        .withColumn("aliasStruct", udf_alias(F.col("aliasStruct")))
+
+    df = df.select("source", "sourceId", "sidType", "firstName", "lastName", "middleNameList")
+   
     # df2.select("aliasStruct").sample(withReplacement=True, fraction=.01).show(10, False)
-    df2.printSchema()
+    
+    df = df.join(df2, df["sourceId"] ==  df2["sourceId"], "left")
+
     return df
 
 
@@ -291,20 +301,18 @@ def main():
     # show_sample_col(ofac, "akalist")
     # show_sample_col(uk, "dob")
 
-    # ofac_cols = ["source", "sourceId", "sidType", "firstName", "lastName", "middleNameList", "titleList"
-    #         , "positionList" , "dobMap", "aliasStruct"
-    #         ]
+    ofac_cols = ["source", "sourceId", "sidType", "firstName", "lastName", "middleNameList", "titleList"
+            , "positionList" , "dobMap", "aliasStruct" ]
 
-    # ofac = get_ofac()
-    # ofac = make_simple_cols(ofac)
-    # ofac = make_dob(ofac)
-    # ofac = make_aliases(ofac)
-    # ofac = ofac.select(*ofac_cols)
-    # ofac.printSchema()
+    ofac = get_ofac()
+    ofac = make_simple_cols(ofac)
+    ofac = make_dob(ofac)
+    ofac = make_aliases(ofac)
+    ofac = ofac.select(*ofac_cols)
+    ofac.printSchema()
     
     uk_cols = ["source", "sourceId", "sidType", "firstName", "lastName", "middleNameList", "title"
-            , "position" , "dobMap", "aliasStruct"
-            ]
+            , "position" , "dobMap", "aliasStruct"]
     
     uk = get_uk_treasury()
     uk = make_simple_cols(uk)
@@ -313,6 +321,8 @@ def main():
     uk = uk.select(*uk_cols)
     uk = aggregate_uk(uk)
     
+    ofac.printSchema()
+    uk.printSchema()
     
 
 if __name__ == "__main__":

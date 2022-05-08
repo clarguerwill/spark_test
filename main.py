@@ -9,6 +9,7 @@ import json
 import xmltodict
 import re
 import ast
+
 # com.databricks:spark-xml_2.11:0.12.0
 # spark-submit --master local[*] --py-files="Users/clarisseguerin-williams/Documents/ofac_data/optimize-spark.py" tesT.py
 
@@ -115,11 +116,11 @@ def make_dob(df):
                 dy = re.search(r'(\d{2})', dob) if len(dob) > 4 else None
                 dy = dy.group(0) if dy is not None else None
                 d["day"] = dy if dy is not None and int(dy) != 0 else None
+                m = re.search(r'([a-zA-Z]{3})', dob)
+                d["month"] = months.get(m.group(0)) if m is not None else None
                 y = re.search(r'(\d{4})', dob)
                 y = y.group(0) if y is not None else None
                 d["year"] = y if y is not None and int(y) != 0 else None
-                m = re.search(r'([a-zA-Z]{3})', dob)
-                d["month"] = months.get(m.group(0)) if m is not None else None
 
                 return [d] if d is not None else None
 
@@ -166,23 +167,58 @@ def make_aliases(df):
 
     if source == SRC_OFAC:
         # uid, type, category, lastName, firstName
-        # end as full data schema
-        df = df \
-        .withColumn("aliasStr", F.col("akalist")["aka"])
+        def ofac_alias(x):
+            x = ast.literal_eval(x) if x is not None and isinstance(x, str) else None
+            if isinstance(x, list):
+                l = []
+                for d in x: 
+                    d = ofac_alias(d)
+                    l.extend(d) if d is not None else None
+                return l
 
+            elif isinstance(x, dict):
+                d = {}
+                d["id"] = x["uid"]
+                d["aliasType"] = x["type"]
+                d["aliasQuality"] = x["category"]
+                d["firstName"] = x["firstName"] if "firstName" in x.keys() else None
+                d["lastName"] = x["lastName"] if "lastName" in x.keys() else None
+                d["middleNameList"] = None
+                d["nonLatinName"] = None
+                d["nonLatinType"] = None
+                d["nonLatinLanguage"] = None
+                return [d] if d is not None else None
+
+            else: return None
+
+        alias_schema = T.ArrayType(T.StructType([
+            T.StructField("id", T.StringType(),True), \
+            T.StructField("aliasType", T.StringType(),True), \
+            T.StructField("aliasQuality", T.StringType(),True), \
+            T.StructField("firstName", T.StringType(), True), \
+            T.StructField("lastName", T.StringType(), True), \
+            T.StructField("middleNameList", T.ArrayType(T.StringType()), True), \
+            T.StructField("nonLatinName", T.StringType(), True), \
+            T.StructField("nonLatinType", T.StringType(), True), \
+            T.StructField("nonLatinLanguage", T.StringType(), True) 
+        ]))
+
+        udf_alias = F.udf(lambda x: ofac_alias(x), alias_schema)
+
+        df = df \
+        .withColumn("aliasStr", F.col("akalist")["aka"])  \
+        .withColumn("aliasStruct", udf_alias(F.col("aliasStr")))
+        
 
     elif source == SRC_UK:
-        # AliasType, AliasQuality, lastName, firstName, middleNameList
-        # Name Non-Latin Script and Non-Latin Script Type and Non-Latin Script Language
 
-        # end as structure type
         df = df \
         .withColumn("aliasStruct", F.struct(
             F.lit(None).cast(T.StringType()).alias("id"),
             F.col("aliastype").cast(T.StringType()).alias("aliasType"),
             F.col("aliasquality").cast(T.StringType()).alias("aliasQuality"),
-            F.col("lastName").cast(T.StringType()).alias("lastName"),
             F.col("firstName").cast(T.StringType()).alias("firstName"),
+            F.col("lastName").cast(T.StringType()).alias("lastName"),
             F.col("middleNameList").cast(T.ArrayType(T.StringType())).alias("middleNameList"),
             F.col("namenonlatinscript").cast(T.StringType()).alias("nonLatinName"),
             F.col("nonlatinscripttype").cast(T.StringType()).alias("nonLatinType"),
@@ -224,10 +260,20 @@ def main():
 
     # show_sample_col(ofac, "akalist")
     # show_sample_col(uk, "dob")
-    # quit()
+
+    ofac_cols = ["source", "sourceId", "sidType", "firstName", "lastName", "middleNameList", "titleList"
+            , "positionList" , "dobMap", "aliasStruct"
+            ]
+    cols = ["source", "sourceId", "aliasStr", "aliasStruct"]
+
+    ofac = get_ofac()
+    ofac = make_simple_cols(ofac)
+    ofac = make_dob(ofac)
+    ofac = make_aliases(ofac)
+    show_sample_rows(ofac, ofac_cols)
     
     uk_cols = ["source", "sourceId", "sidType", "firstName", "lastName", "middleNameList", "title"
-            , "position" , "dobMap"
+            , "position" , "dobMap", "aliasStruct"
             ]
     cols = ["source", "sourceId", "aliasStruct"]
     
@@ -236,20 +282,7 @@ def main():
 
     uk = make_dob(uk)
     uk = make_aliases(uk)
-    show_sample_rows(uk, cols)
-    quit()
-
-    ofac_cols = ["source", "sourceId", "sidType", "firstName", "lastName", "middleNameList", "titleList"
-            , "positionList" , "dobMap", "aliasStr"
-            ]
-    cols = ["source", "sourceId"]
-
-    ofac = get_ofac()
-    ofac = make_simple_cols(ofac)
-    ofac = make_dob(ofac)
-    ofac = make_aliases(ofac)
-    show_sample_rows(ofac, ofac_cols)
-    quit()
+    show_sample_rows(uk, uk_cols)
     
 
 if __name__ == "__main__":

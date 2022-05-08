@@ -155,10 +155,6 @@ def make_dob(df):
 
     return df
 
-def agg_uk(df):
-    # agg title, position, dobMap, aliasStruct
-    pass
-
 
 def make_aliases(df):
     source = df.first()["source"]
@@ -228,7 +224,25 @@ def make_aliases(df):
     else: df = None
 
     return df
-  
+
+
+def aggregate_uk(uk):
+    # agg title, position, dobMap, aliasStruct
+    # parition on sourceid
+    # middleNameList (from main name)
+    # title (distinct across all rows) >>> list
+    # position (distinct across all rows) >>> list
+    # dobMap (distinct across all rows) >>> list 
+    # aliasStruct (distinct across all rows) >>> list 
+    source_ids = uk.select("sourceId").distinct().rdd.flatMap(lambda x: x).collect()
+    print(len(source_ids))
+    uk = uk.repartition(1, "sourceId")
+    print(uk.rdd.getNumPartitions())
+
+    df = None
+    return df
+
+
 
 def print_counts(df, col):
     cntd = str(df.select(col).distinct().count())
@@ -261,28 +275,28 @@ def main():
     # show_sample_col(ofac, "akalist")
     # show_sample_col(uk, "dob")
 
-    ofac_cols = ["source", "sourceId", "sidType", "firstName", "lastName", "middleNameList", "titleList"
-            , "positionList" , "dobMap", "aliasStruct"
-            ]
-    cols = ["source", "sourceId", "aliasStr", "aliasStruct"]
+    # ofac_cols = ["source", "sourceId", "sidType", "firstName", "lastName", "middleNameList", "titleList"
+    #         , "positionList" , "dobMap", "aliasStruct"
+    #         ]
 
-    ofac = get_ofac()
-    ofac = make_simple_cols(ofac)
-    ofac = make_dob(ofac)
-    ofac = make_aliases(ofac)
-    show_sample_rows(ofac, ofac_cols)
+    # ofac = get_ofac()
+    # ofac = make_simple_cols(ofac)
+    # ofac = make_dob(ofac)
+    # ofac = make_aliases(ofac)
+    # ofac = ofac.select(*ofac_cols)
+    # ofac.printSchema()
     
     uk_cols = ["source", "sourceId", "sidType", "firstName", "lastName", "middleNameList", "title"
             , "position" , "dobMap", "aliasStruct"
             ]
-    cols = ["source", "sourceId", "aliasStruct"]
     
     uk = get_uk_treasury()
     uk = make_simple_cols(uk)
-
     uk = make_dob(uk)
     uk = make_aliases(uk)
-    show_sample_rows(uk, uk_cols)
+    uk = uk.select(*uk_cols)
+    uk = aggregate_uk(uk)
+    
     
 
 if __name__ == "__main__":

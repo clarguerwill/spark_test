@@ -227,11 +227,6 @@ def make_aliases(df):
 
 
 def aggregate_uk(uk):
-    # agg title, position, dobMap, aliasStruct
-    # parition on sourceid
-    # middleNameList (from main name)
-    # title (distinct across all rows) >>> list
-    # position (distinct across all rows) >>> list
     # dobMap (distinct across all rows) >>> list 
     # aliasStruct (distinct across all rows) >>> list
     uk = uk \
@@ -243,9 +238,24 @@ def aggregate_uk(uk):
         ).drop("aliasType") \
         .withColumn("row_num", F.row_number().over(Window.partitionBy("sourceId").orderBy("orderId")))
     
-    df = uk.filter("row_num == 1").drop("row_num")
-    df2 = uk.filter("row_num !> 1").drop("row_num")
+    df = uk.filter("row_num == 1")
+    df2 = uk.filter("row_num <> 1") \
+        .withColumn("aliasStruct", 
+            F.when(F.col("aliasStruct")["aliasType"] == "Primary name", None)
+            .otherwise(F.col("aliasStruct"))
+        )
 
+    df2 = df2.groupBy("sourceId").agg(
+        F.collect_set("title").alias("titleList"),
+        F.collect_set("position").alias("positionList"),
+        F.collect_set(F.to_json(F.col("dobMap"))).alias("dobMap"),
+        F.collect_set(F.to_json(F.col("aliasStruct"))).alias("aliasStruct")
+    )
+
+    # df2.select("dobMap").filter("sourceId == 13720").show(10, False)
+    # df2.select("dobMap").sample(withReplacement=True, fraction=.01).show(10, False)
+    # df2.select("aliasStruct").sample(withReplacement=True, fraction=.01).show(10, False)
+    df2.printSchema()
     return df
 
 

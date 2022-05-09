@@ -89,7 +89,6 @@ def make_simple_cols(df):
     
 
 def make_dob(df):
-    # ofac "dateOfBirth" "dd mmm yyyy" 
 
     source = df.first()["source"]
 
@@ -99,12 +98,12 @@ def make_dob(df):
                     'JUL': '07', 'AUG': '08', 'SEP': '09', 'OCT': '10', 'NOV': '11', 'DEC': '12'}
 
         def ofac_dob(x):
-            x = ast.literal_eval(x) if x is not None and isinstance(x, str) else None
+            x = ast.literal_eval(x) if x and isinstance(x, str) else None
             if isinstance(x, list):
                 l = []
                 for d in x: 
                     d = ofac_dob(d)
-                    l.extend(d) if d is not None else None
+                    l.extend(d) if d else None
                 return l
 
             elif isinstance(x, dict):
@@ -114,15 +113,15 @@ def make_dob(df):
                 dob = x["dateOfBirth"].upper()
                 
                 dy = re.search(r'(\d{2})', dob) if len(dob) > 4 else None
-                dy = dy.group(0) if dy is not None else None
-                d["day"] = dy if dy is not None and int(dy) != 0 else None
+                dy = dy.group(0) if dy else None
+                d["day"] = dy if dy and int(dy) != 0 else None
                 m = re.search(r'([a-zA-Z]{3})', dob)
-                d["month"] = months.get(m.group(0)) if m is not None else None
+                d["month"] = months.get(m.group(0)) if m else None
                 y = re.search(r'(\d{4})', dob)
-                y = y.group(0) if y is not None else None
-                d["year"] = y if y is not None and int(y) != 0 else None
+                y = y.group(0) if y else None
+                d["year"] = y if y and int(y) != 0 else None
 
-                return [d] if d is not None else None
+                return [d] if d else None
 
             else: return None
 
@@ -160,14 +159,14 @@ def make_aliases(df):
     source = df.first()["source"]
 
     if source == SRC_OFAC:
-        # uid, type, category, lastName, firstName
+
         def ofac_alias(x):
-            x = ast.literal_eval(x) if x is not None and isinstance(x, str) else None
+            x = ast.literal_eval(x) if x and isinstance(x, str) else None
             if isinstance(x, list):
                 l = []
                 for d in x: 
                     d = ofac_alias(d)
-                    l.extend(d) if d is not None else None
+                    l.extend(d) if d else None
                 return l
 
             elif isinstance(x, dict):
@@ -178,7 +177,7 @@ def make_aliases(df):
                 d["firstName"] = x["firstName"] if "firstName" in x.keys() else None
                 d["lastName"] = x["lastName"] if "lastName" in x.keys() else None
                 d["middleNameList"] = None
-                return [d] if d is not None else None
+                return [d] if d else None
 
             else: return None
 
@@ -250,8 +249,12 @@ def aggregate_uk(uk):
         ]))
 
     def convert_str_to_dict(arr):
-        arr2 = [ast.literal_eval(d) for d in arr if d is not None]
-        return arr2
+        arr2 = []
+        if arr:
+            for d in arr:
+                if d: arr2.append(ast.literal_eval(d.replace(":null", ":None")))
+            return arr2
+        else: return None
 
     udf_dob = F.udf(convert_str_to_dict, T.ArrayType(T.MapType(T.StringType(), T.StringType())))
     udf_alias = F.udf(convert_str_to_dict, alias_schema)
@@ -261,10 +264,8 @@ def aggregate_uk(uk):
         .withColumn("aliasStruct", udf_alias(F.col("aliasStruct")))
 
     df = df.select("source", "sourceId", "sidType", "firstName", "lastName", "middleNameList")
-   
-    # df2.select("aliasStruct").sample(withReplacement=True, fraction=.01).show(10, False)
-    
-    df = df.join(df2, df["sourceId"] ==  df2["sourceId"], "left")
+       
+    df = df.join(df2, "sourceId", "left")
 
     return df
 
@@ -279,13 +280,13 @@ def print_counts(df, col):
 def show_sample_col(df, col, n=20, f=.01):
     df.select(col) \
         .filter(f"{col} IS NOT NULL") \
-        .sample(withReplacement=True, fraction=f) \
+        .sample(fraction=f) \
         .show(n, False)
 
 
 def show_sample_rows(df, cols, n=10, f=.01):
     df.select(*cols) \
-        .sample(withReplacement=True, fraction=f) \
+        .sample(fraction=f) \
         .show(n, False)
  
 
@@ -298,9 +299,6 @@ def main():
         .appName("Spark Assessment") \
         .getOrCreate()
 
-    # show_sample_col(ofac, "akalist")
-    # show_sample_col(uk, "dob")
-
     ofac_cols = ["source", "sourceId", "sidType", "firstName", "lastName", "middleNameList", "titleList"
             , "positionList" , "dobMap", "aliasStruct" ]
 
@@ -309,7 +307,6 @@ def main():
     ofac = make_dob(ofac)
     ofac = make_aliases(ofac)
     ofac = ofac.select(*ofac_cols)
-    ofac.printSchema()
     
     uk_cols = ["source", "sourceId", "sidType", "firstName", "lastName", "middleNameList", "title"
             , "position" , "dobMap", "aliasStruct"]
@@ -321,9 +318,11 @@ def main():
     uk = uk.select(*uk_cols)
     uk = aggregate_uk(uk)
     
-    ofac.printSchema()
-    uk.printSchema()
-    
+    df = ofac.union(uk)
+    # df.printSchema()
+    # df.sample(fraction=.01).show()
+    df.coalesce(1).write.parquet("combined_output.parquet", mode = "overwrite")
+
 
 if __name__ == "__main__":
     main()

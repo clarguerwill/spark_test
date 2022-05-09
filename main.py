@@ -210,8 +210,8 @@ def make_aliases(df):
             elif isinstance(x, dict):
                 d = {}
                 d["id"] = x["uid"]
-                d["aliasType"] = x["type"]
-                d["aliasQuality"] = x["category"]
+                d["aliasType"] = x["type"].replace(".", "").upper()
+                d["aliasQuality"] = x["category"].title()
                 d["firstName"] = x["firstName"] if "firstName" in x.keys() else None
                 d["lastName"] = x["lastName"] if "lastName" in x.keys() else None
                 d["middleNameList"] = None

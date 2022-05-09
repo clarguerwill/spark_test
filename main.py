@@ -238,6 +238,9 @@ def make_aliases(df):
     elif source == SRC_UK:
         # Rename the columns that will be used in the aliasStruct column
         df = df \
+        .withColumn("aliastype", 
+            F.when(F.col("aliastype") == "Primary name variation", F.lit("AKA")) \
+            .otherwise(F.col("aliastype"))) \
         .withColumn("aliasStruct", F.struct(
             F.lit(None).cast(T.StringType()).alias("id"),
             F.col("aliastype").cast(T.StringType()).alias("aliasType"),
@@ -264,7 +267,7 @@ def aggregate_uk(uk):
         .withColumn("aliasType", F.col("aliasStruct")["aliasType"]) \
         .withColumn("orderId", 
             F.when(F.col("aliasType") == "Primary name", 1) \
-            .when(F.col("aliasType") == "Primary name variation", 2) \
+            .when(F.col("aliasType") == "AKA", 2) \
             .otherwise(F.lit(0))
         ).drop("aliasType") \
         .withColumn("row_num", F.row_number().over(Window.partitionBy("sourceId").orderBy("orderId")))
